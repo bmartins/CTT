@@ -4,9 +4,16 @@ use 5.006;
 use strict;
 use warnings;
 
+use LWP::UserAgent;
+use HTTP::Request::Common;
+use Mojo::DOM;
+use Data::Dumper;
+use Encode;
+
+
 =head1 NAME
 
-CTT - The great new CTT!
+CTT - Interface to Portuguese Post Office services
 
 =head1 VERSION
 
@@ -19,13 +26,15 @@ our $VERSION = '0.01';
 
 =head1 SYNOPSIS
 
-Quick summary of what the module does.
+This modules provides a few methods that queries CTT (Portugues Postal Office) website.
 
 Perhaps a little code snippet.
 
     use CTT;
 
-    my $foo = CTT->new();
+    my $ctt = CTT->new();
+	my $package = $ctt->get_package_details($package_ref);
+	my $status = $package->{'status'};
     ...
 
 =head1 EXPORT
@@ -35,9 +44,80 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =head1 SUBROUTINES/METHODS
 
-=head2 function1
+=head2 get_package_details
 
 =cut
+
+sub new {
+    my ( $this, @args ) = @_;
+
+    my $class = ( ref($this) or $this );
+    my $self = {};
+    bless $self, $class;
+    return $self;
+}
+
+sub get_package_details {
+    my ($self, $ref) = @_;
+    my $url = 'http://www.ctt.pt/feapl_2/app/open/objectSearch/cttObjectSearch.jspx';
+
+    my %args = (
+        'pesqObjecto.objectoId' => $ref,
+        'showResults'           => 'true',
+    );
+    my $req = POST $url, \%args;
+
+    my $ua = LWP::UserAgent->new();
+    my $response = $ua->request($req);
+
+    if ($response->is_success) {
+        return $self->parse_package_data($response->content);
+    } else {
+		warn "Got an error geting package info";
+		return undef;
+    }
+
+}
+
+sub parse_package_data {
+    my ($self, $html) = @_;
+
+	my %map_keys = (
+        'Local'   => 'place',
+        'Hora'    => 'time',
+        'Data'    => 'date',
+        'Recetor' => 'receiver',
+        'Motivo'  => 'reason',
+        'Estado'  => 'status',
+    );
+
+    my @package_data = ();
+    my $dom = Mojo::DOM->new($html);
+    my $skidiv;
+    my @keys = ();
+    my $div = $dom->find('div[class="tableSmall"]')->[1];
+
+    my @trs = $div->find('tr')->each;
+    my $header = shift @trs;
+    for my $key ($header->find('th')->each) {
+        push @keys, $map_keys{$key->text};
+    }
+
+    for my $tr (@trs) {
+        my %row_data;
+        my @tds = $tr->find('td')->each;
+
+        my $l = @tds;
+        $l--;
+        for my $i(0..$l) {
+            $row_data{$keys[$i]} = encode("utf8", $tds[$i]->text);
+        }
+        unshift @package_data, \%row_data;
+    }
+
+    return \@package_data;
+
+}
 
 sub function1 {
 }
